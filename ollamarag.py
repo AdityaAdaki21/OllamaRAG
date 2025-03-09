@@ -35,7 +35,7 @@ class OllamaRAG:
         self.embedding_model = embedding_model
         self.current_pdf = None
         self.model_loaded = False
-        self.context_window = 2048  # Default context window size, adjust for your model
+        self.context_window = 4096  # Default context window size, adjust for your model
         self.base_url = "http://localhost:11434/api"
         
         # Create a directory for ChromaDB persistence
@@ -80,10 +80,10 @@ class OllamaRAG:
                 available_models = [model["name"] for model in response.json()["models"]]
                 
                 missing_models = []
-                if self.llm_model not in available_models:
-                    missing_models.append(self.llm_model)
-                if self.embedding_model not in available_models:
-                    missing_models.append(self.embedding_model)
+                if f"{self.llm_model}:latest" not in available_models:
+                    missing_models.append(f"{self.llm_model}:latest")
+                if f"{self.embedding_model}:latest" not in available_models:
+                    missing_models.append(f"{self.embedding_model}:latest")
                 
                 if missing_models:
                     console.print("[bold yellow]Warning:[/bold yellow] The following models are not available:")
@@ -245,7 +245,7 @@ class OllamaRAG:
             }
     
     
-    def ingest_pdf(self, pdf_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
+    def ingest_pdf(self, pdf_path: str, chunk_size: int = 1000, chunk_overlap: int = 500, 
                    max_workers: int = 4) -> None:
         """
         Ingest a PDF document, chunk it, and store in ChromaDB.
@@ -444,7 +444,7 @@ class OllamaRAG:
         keep_alive_thread.start()
         console.print("[dim]Started background thread to keep models loaded[/dim]")
     
-    def generate_response(self, query: str, system_prompt: str = None, top_k: int = 3) -> str:
+    def generate_response(self, query: str, system_prompt: str = None, top_k: int = 5) -> str:
         """
         Generate a response to the query using the LLM and retrieved context.
         
@@ -456,49 +456,87 @@ class OllamaRAG:
         Returns:
             The generated response
         """
-        # Find relevant chunks
+        # Find relevant chunks with increased top_k for better context
         relevant_chunks = self.find_similar_chunks(query, top_k=top_k)
         
         if not relevant_chunks:
             return "No relevant information found. Please ingest a PDF document first."
         
-        # Create context from retrieved chunks
-        context = "\n\n".join([chunk["text"] for chunk in relevant_chunks])
+        # Sort chunks by similarity score in descending order
+        relevant_chunks.sort(key=lambda x: x["similarity"], reverse=True)
         
-        # Default system prompt if none provided
+        # Create context from retrieved chunks with chunk markers
+        context_parts = []
+        for i, chunk in enumerate(relevant_chunks):
+            chunk_text = chunk["text"].strip()
+            # Add chunk markers to help the model distinguish between sources
+            context_parts.append(f"[Document {i+1}] {chunk_text}")
+        
+        context = "\n\n".join(context_parts)
+        
+        # Improved system prompt with better instructions
         if not system_prompt:
             system_prompt = (
-                "You are a helpful assistant. Answer the user's question based on the provided context. "
-                "If the context doesn't contain relevant information, say you don't know."
+                "You are a precise and helpful research assistant. Your task is to answer the user's question "
+                "based solely on the provided context information. Follow these guidelines:\n"
+                "1. Only use information explicitly stated in the context.\n"
+                "2. If the context doesn't contain the answer, say 'Based on the provided information, I cannot answer this question.'\n"
+                "3. Do not introduce external knowledge or assumptions.\n"
+                "4. If information is partially available, provide what you can find and acknowledge the limitations.\n"
+                "5. If the user asks for a specific format (list, table, etc.), follow that format.\n"
+                "6. Be concise but thorough. Aim for comprehensive accuracy.\n"
+                "7. If the context contains conflicting information, acknowledge the conflict and present both perspectives.\n"
+                "8. Cite the document numbers ([Document X]) when referring to specific information."
             )
         
-        # Prepare the prompt with context and query
-        prompt = f"""Context information is below.
----------------------
-{context}
----------------------
+        # Improved prompt template with query-focused instructions
+        prompt = f"""## Context Information
+    {context}
 
-Given the context information and not prior knowledge, answer the following question:
-{query}
-"""
+    ## Question
+    {query}
+
+    ## Instructions
+    - Answer the question thoroughly based ONLY on the context provided above.
+    - If you need to make an inference from the context, clearly indicate it as such.
+    - Format your answer clearly and logically.
+    - Include relevant details from the context to support your answer.
+    - Cite specific document sections when appropriate using [Document X] notation.
+    """
         
         # Ensure we don't exceed the context window
         if len(prompt) > self.context_window:
-            # Truncate context to fit within context window
-            max_context_length = self.context_window - len(query) - 200  # Leave room for query and other text
-            context_truncated = context[:max_context_length] + "..."
-            prompt = f"""Context information is below (truncated to fit context window).
----------------------
-{context_truncated}
----------------------
+            # More strategic truncation - keep high similarity chunks intact
+            current_length = len(prompt)
+            target_length = self.context_window - 500  # Leave room for other parts
+            
+            # Start removing lower-ranked chunks until we fit
+            while current_length > target_length and len(context_parts) > 1:
+                # Remove the last (lowest similarity) chunk
+                removed_chunk = context_parts.pop()
+                # Regenerate the context
+                context = "\n\n".join(context_parts)
+                # Recalculate the prompt
+                prompt = f"""## Context Information
+    {context}
 
-Given the context information and not prior knowledge, answer the following question:
-{query}
-"""
+    ## Question
+    {query}
+
+    ## Instructions
+    - Answer the question thoroughly based ONLY on the context provided above.
+    - If you need to make an inference from the context, clearly indicate it as such.
+    - Format your answer clearly and logically.
+    - Include relevant details from the context to support your answer.
+    - Cite specific document sections when appropriate using [Document X] notation.
+
+    Note: Some less relevant context was removed to fit within the model's context window.
+    """
+                current_length = len(prompt)
         
         start_time = time.time()
         
-        # Send the request to Ollama
+        # Send the request to Ollama with temperature control
         with console.status("[bold green]Generating response with LLM...[/bold green]") as status:
             response = requests.post(
                 f"{self.base_url}/generate",
@@ -507,7 +545,9 @@ Given the context information and not prior knowledge, answer the following ques
                     "prompt": prompt,
                     "system": system_prompt,
                     "stream": False,
-                    "keep_alive": "5m"  # Keep model loaded for 5 minutes
+                    "temperature": 0.2,  # Lower temperature for more factual responses
+                    "top_p": 0.9,        # Better quality generation
+                    "keep_alive": "5m"   # Keep model loaded for 5 minutes
                 }
             )
             
@@ -515,6 +555,9 @@ Given the context information and not prior knowledge, answer the following ques
                 return f"Error generating response: {response.text}"
             
             response_text = response.json()["response"]
+            
+            # Post-process the response
+            response_text = self._post_process_response(response_text)
             
             # Record stats
             total_time = time.time() - start_time
@@ -538,3 +581,40 @@ Given the context information and not prior knowledge, answer the following ques
             console.print(f"[dim]Response generated in {total_time:.2f} seconds[/dim]")
         
         return response_text
+
+    def _post_process_response(self, text: str) -> str:
+        """
+        Post-process the model's response for better formatting and clarity.
+        
+        Args:
+            text: The raw response text from the LLM
+            
+        Returns:
+            Processed response text
+        """
+        # Remove any preamble like "Based on the context provided,"
+        text = re.sub(r"^(Based on (the|your) (context|information|document|documents) provided,?\s*)", "", text)
+        
+        # Remove redundant document citations if they're overly repetitive
+        doc_citation_count = len(re.findall(r"\[Document \d+\]", text))
+        if doc_citation_count > 10:  # If there are too many citations
+            # Try to make citations more concise
+            text = re.sub(r"(\[Document \d+\])[,\s]*(\[Document \d+\])", r"\1,\2", text)
+        
+        # Make sure the answer is properly formatted in Markdown
+        if "```" in text and not text.strip().startswith("```"):
+            text = text.replace("```", "\n```")
+        
+        # Ensure the answer has appropriate paragraph breaks
+        if len(text) > 200 and "\n\n" not in text:
+            # Add paragraph breaks for readability
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            if len(sentences) > 3:
+                # Group sentences into paragraphs (3-4 sentences per paragraph)
+                paragraphs = []
+                for i in range(0, len(sentences), 3):
+                    paragraph = " ".join(sentences[i:i+3])
+                    paragraphs.append(paragraph)
+                text = "\n\n".join(paragraphs)
+        
+        return text.strip()

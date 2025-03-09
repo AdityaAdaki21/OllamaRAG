@@ -15,7 +15,6 @@ Key features:
 - 🖥️ Terminal-based interaction for power users
 - ⚡ Background model keep-alive for faster responses
 - 📊 Detailed retrieval statistics for each query
-- 📑 Support for multiple document collections
 - 🌈 (Experimental) Streamlit web-based UI
 
 ## Prerequisites
