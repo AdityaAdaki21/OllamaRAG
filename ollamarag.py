@@ -4,7 +4,6 @@ import json
 import PyPDF2
 import numpy as np
 from typing import List, Dict, Any, Tuple
-import argparse
 import concurrent.futures
 import time
 import sys
@@ -15,10 +14,10 @@ from rich.console import Console
 from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn, SpinnerColumn
 from rich.panel import Panel
 from rich.table import Table
-from rich.markdown import Markdown
 from rich import box
 import chromadb
-from chromadb.utils import embedding_functions
+
+from embedding_functions import OllamaEmbeddingFunction
 
 console = Console()
 
@@ -168,7 +167,6 @@ class OllamaRAG:
         
         return response.json()["embedding"]
     
-    # Replace the get_or_create_collection method with this:
     def get_or_create_collection(self, collection_name: str) -> chromadb.Collection:
         """
         Get a collection or create it if it doesn't exist.
@@ -540,215 +538,3 @@ Given the context information and not prior knowledge, answer the following ques
             console.print(f"[dim]Response generated in {total_time:.2f} seconds[/dim]")
         
         return response_text
-
-
-class OllamaEmbeddingFunction(embedding_functions.EmbeddingFunction):
-    """Custom embedding function for ChromaDB that uses Ollama."""
-    
-    def __init__(self, base_url: str, model_name: str):
-        self.base_url = base_url
-        self.model_name = model_name
-        
-    def __call__(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts."""
-        results = []
-        for text in texts:
-            response = requests.post(
-                f"{self.base_url}/embeddings",
-                json={
-                    "model": self.model_name,
-                    "prompt": text,
-                    "keep_alive": "5m"
-                }
-            )
-            
-            if response.status_code != 200:
-                raise Exception(f"Error getting embeddings: {response.text}")
-            
-            results.append(response.json()["embedding"])
-        
-        return results
-
-
-def display_help():
-    """Display help information."""
-    help_panel = Panel(
-        """[bold]Available Commands:[/bold]
-        
-• [cyan]<question>[/cyan] - Ask any question about the document
-• [cyan]exit[/cyan], [cyan]quit[/cyan] - End the session
-• [cyan]list[/cyan] - List available collections in ChromaDB
-• [cyan]use <collection>[/cyan] - Switch to a different collection
-• [cyan]help[/cyan] - Display this help message
-• [cyan]stats[/cyan] - Display knowledge base statistics
-• [cyan]clear[/cyan] - Clear the terminal screen""",
-        title="[bold blue]OllamaRAG with ChromaDB Help[/bold blue]",
-        border_style="blue"
-    )
-    console.print(help_panel)
-
-
-def display_stats(rag):
-    """Display knowledge base statistics."""
-    if not rag.current_pdf:
-        console.print("[yellow]No collection currently selected.[/yellow]")
-        return
-    
-    collection_name = os.path.splitext(rag.current_pdf)[0]
-    
-    try:
-        collection = rag.get_or_create_collection(collection_name)
-        collection_stats = collection.count()
-        
-        stats_table = Table(title="ChromaDB Collection Statistics", box=box.ROUNDED)
-        stats_table.add_column("Metric", style="cyan")
-        stats_table.add_column("Value", style="green")
-        
-        stats_table.add_row("Collection", collection_name)
-        stats_table.add_row("Document Count", str(collection_stats))
-        stats_table.add_row("LLM Model", rag.llm_model)
-        stats_table.add_row("Embedding Model", rag.embedding_model)
-        
-        console.print(stats_table)
-    except Exception as e:
-        console.print(f"[bold red]Error getting collection statistics:[/bold red] {e}")
-
-
-def list_collections(rag):
-    """List all available collections in ChromaDB."""
-    try:
-        collections = rag.chroma_client.get_collection()
-        
-        if not collections:
-            console.print("[yellow]No collections found in ChromaDB.[/yellow]")
-            return
-        
-        table = Table(title="Available Collections", box=box.ROUNDED)
-        table.add_column("Name", style="cyan")
-        table.add_column("Documents", style="green", justify="right")
-        
-        for collection in collections:
-            col = rag.chroma_client.get_collection(collection.name)
-            count = col.count()
-            table.add_row(collection.name, str(count))
-        
-        console.print(table)
-    except Exception as e:
-        console.print(f"[bold red]Error listing collections:[/bold red] {e}")
-
-
-def switch_collection(rag, collection_name):
-    """Switch to a different collection."""
-    try:
-        collections = [c.name for c in rag.chroma_client.list_collections()]
-        
-        if collection_name not in collections:
-            console.print(f"[bold red]Collection '{collection_name}' not found.[/bold red]")
-            return
-        
-        # Set current PDF name based on collection
-        rag.current_pdf = f"{collection_name}.pdf"
-        
-        collection = rag.get_or_create_collection(collection_name)
-        count = collection.count()
-        console.print(f"[bold green]Switched to collection '[blue]{collection_name}[/blue]' with [cyan]{count}[/cyan] documents.[/bold green]")
-    except Exception as e:
-        console.print(f"[bold red]Error switching collections:[/bold red] {e}")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="PDF-based RAG using Ollama and ChromaDB")
-    parser.add_argument("--pdf", type=str, help="Path to PDF file to ingest")
-    parser.add_argument("--collection", type=str, help="ChromaDB collection to use")
-    parser.add_argument("--llm", type=str, default="tinyllama", help="LLM model to use")
-    parser.add_argument("--embedder", type=str, default="mxbai-embed-large", help="Embedding model to use")
-    parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers for processing")
-    parser.add_argument("--context-window", type=int, default=2048, help="Context window size for the LLM")
-    
-    args = parser.parse_args()
-    
-    # Initialize the RAG system
-    rag = OllamaRAG(llm_model=args.llm, embedding_model=args.embedder)
-    
-    # Set context window size
-    rag.context_window = args.context_window
-    
-    # Start the keep-alive thread
-    rag.start_keep_alive_thread()
-    
-    # Either use existing collection or ingest a new PDF
-    if args.collection:
-        switch_collection(rag, args.collection)
-    elif args.pdf:
-        rag.ingest_pdf(args.pdf, max_workers=args.workers)
-    else:
-        console.print("[bold yellow]No PDF or collection specified. Use --pdf to ingest a document or --collection to use an existing one.[/bold yellow]")
-        collections = rag.chroma_client.list_collections()
-        if collections:
-            console.print("[green]Available collections:[/green]")
-            for collection in collections:
-                console.print(f"  • [blue]{collection.name}[/blue]")
-    
-    # Display system ready message
-    console.print(Panel.fit(
-        f"[bold green]System ready with model:[/bold green] [blue]{args.llm}[/blue]\n"
-        "[italic]Type [bold cyan]help[/bold cyan] for available commands[/italic]",
-        border_style="green"
-    ))
-    
-    # Interactive query loop
-    while True:
-        try:
-            query = console.input("\n[bold blue]>[/bold blue] ")
-            
-            # Check for special commands
-            if query.lower() in ['exit', 'quit']:
-                console.print("[yellow]Exiting...[/yellow]")
-                break
-            elif query.lower() == 'help':
-                display_help()
-                continue
-            elif query.lower() == 'stats':
-                display_stats(rag)
-                continue
-            elif query.lower() == 'list':
-                list_collections(rag)
-                continue
-            elif query.lower().startswith('use '):
-                collection_name = query.lower()[4:].strip()
-                switch_collection(rag, collection_name)
-                continue
-            elif query.lower() == 'clear':
-                console.clear()
-                continue
-            elif not query.strip():
-                continue
-            
-            # Generate and display response
-            start_time = time.time()
-            response = rag.generate_response(query)
-            total_time = time.time() - start_time
-            
-            # Display the response in a nice format
-            console.print(Panel(
-                Markdown(response),
-                title="[bold]Response[/bold]",
-                border_style="green",
-                expand=False
-            ))
-            
-            console.print(f"[dim]Response time: {total_time:.2f}s[/dim]")
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Operation canceled by user[/yellow]")
-        except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] {e}")
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Program terminated by user[/yellow]")
-    except Exception as e:
-        console.print(f"\n[bold red]Error:[/bold red] {e}")
-        sys.exit(1)

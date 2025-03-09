@@ -13,11 +13,14 @@ Key features:
 - 💡 Context-aware responses from the LLM
 - 🧠 Persistent knowledge base with ChromaDB
 - 🌈 Beautiful terminal UI with rich formatting
+- ⚡ Background model keep-alive for faster responses
+- 📊 Detailed retrieval statistics for each query
+- 📑 Support for multiple document collections
 
 ## Prerequisites
 
 - [Ollama](https://ollama.ai/) installed and running
-- Python 3.9 with pip
+- Python 3.9+ with pip
 - Required models pulled in Ollama:
   - An LLM model (default: `tinyllama`)
   - An embedding model (default: `mxbai-embed-large`)
@@ -51,7 +54,7 @@ ollama pull mxbai-embed-large
 ### Ingesting a PDF
 
 ```bash
-python ollamarag.py --pdf path/to/your/document.pdf
+python main.py --pdf path/to/your/document.pdf
 ```
 
 Optional parameters:
@@ -63,7 +66,7 @@ Optional parameters:
 ### Using an Existing Collection
 
 ```bash
-python ollamarag.py --collection collection_name
+python main.py --collection collection_name
 ```
 
 ### Interactive Commands
@@ -83,6 +86,7 @@ Once the application is running, you can use the following commands:
 2. **Embedding Generation**: Each text chunk is transformed into a vector embedding using the specified embedding model.
 3. **Semantic Search**: When you ask a question, the system finds the most relevant chunks by embedding similarity.
 4. **Context-Aware Response**: The LLM generates a response based on your question and the retrieved context.
+5. **Model Keep-Alive**: A background thread keeps the models loaded in memory for faster responses.
 
 ## Advanced Configuration
 
@@ -92,10 +96,10 @@ You can use any model available in Ollama:
 
 ```bash
 # Use a different LLM model
-python ollamarag.py --pdf document.pdf --llm llama3.2
+python main.py --pdf document.pdf --llm llama3.2
 
 # Use a different embedding model
-python ollamarag.py --pdf document.pdf --embedder nomic-embed-text
+python main.py --pdf document.pdf --embedder nomic-embed-text
 ```
 
 ### Performance Tuning
@@ -104,14 +108,25 @@ Adjust workers and chunking parameters for better performance:
 
 ```bash
 # Use more parallel workers for faster processing
-python ollamarag.py --pdf document.pdf --workers 8
+python main.py --pdf document.pdf --workers 8
+
+# Adjust context window size for different models
+python main.py --pdf document.pdf --context-window 4096
 ```
+
+## System Architecture
+
+- **main.py**: Entry point and command-line interface
+- **ollamarag.py**: Core RAG functionality and model interaction
+- **ui_utils.py**: Terminal UI utilities using the Rich library
+- **embedding_functions.py**: Custom embedding function for ChromaDB
 
 ## Troubleshooting
 
 - **Ollama Connection Issues**: Ensure Ollama is running with `ollama serve`
 - **Missing Models**: If you see model warnings, pull them with `ollama pull <model_name>`
 - **Memory Issues**: Try using a smaller model like `tinyllama` or reducing the number of workers
+- **ChromaDB Errors**: Check if the `chroma_db` directory has proper permissions
 
 ## Acknowledgments
 
