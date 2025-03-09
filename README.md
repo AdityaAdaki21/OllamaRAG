@@ -1,6 +1,6 @@
 # OllamaRAG
 
-A local PDF Question-Answering system using Ollama and ChromaDB for Retrieval Augmented Generation (RAG).
+A local PDF Question-Answering system using Ollama and ChromaDB for Retrieval Augmented Generation (RAG). The primary interface is a command-line tool, with an experimental Streamlit-based UI for an interactive experience.
 
 ## Overview
 
@@ -12,10 +12,11 @@ Key features:
 - 🔍 Semantic search to find relevant context
 - 💡 Context-aware responses from the LLM
 - 🧠 Persistent knowledge base with ChromaDB
-- 🌈 Beautiful terminal UI with rich formatting
+- 🖥️ Terminal-based interaction for power users
 - ⚡ Background model keep-alive for faster responses
 - 📊 Detailed retrieval statistics for each query
 - 📑 Support for multiple document collections
+- 🌈 (Experimental) Streamlit web-based UI
 
 ## Prerequisites
 
@@ -24,6 +25,7 @@ Key features:
 - Required models pulled in Ollama:
   - An LLM model (default: `tinyllama`)
   - An embedding model (default: `mxbai-embed-large`)
+- (For UI) [Streamlit](https://streamlit.io/)
 
 ## Installation
 
@@ -51,8 +53,9 @@ ollama pull mxbai-embed-large
 
 ## Usage
 
-### Ingesting a PDF
+### Running the Terminal Version (Recommended)
 
+To use the command-line interface:
 ```bash
 python main.py --pdf path/to/your/document.pdf
 ```
@@ -63,15 +66,15 @@ Optional parameters:
 - `--workers` - Number of parallel workers for processing (default: `4`)
 - `--context-window` - Context window size for the LLM (default: `2048`)
 
-### Using an Existing Collection
+### Using an Existing Collection via CLI
 
 ```bash
 python main.py --collection collection_name
 ```
 
-### Interactive Commands
+### Interactive Commands (CLI Mode)
 
-Once the application is running, you can use the following commands:
+Once the application is running in terminal mode, you can use the following commands:
 - Just type your question to query the document
 - `exit`, `quit` - End the session
 - `list` - List available collections in ChromaDB
@@ -79,6 +82,13 @@ Once the application is running, you can use the following commands:
 - `help` - Display help information
 - `stats` - Display knowledge base statistics
 - `clear` - Clear the terminal screen
+
+### Running the (Experimental) Streamlit UI
+
+To launch the interactive UI:
+```bash
+streamlit run UI/ollama_rag_app.py
+```
 
 ## How It Works
 
@@ -114,23 +124,17 @@ python main.py --pdf document.pdf --workers 8
 python main.py --pdf document.pdf --context-window 4096
 ```
 
-## System Architecture
-
-- **main.py**: Entry point and command-line interface
-- **ollamarag.py**: Core RAG functionality and model interaction
-- **ui_utils.py**: Terminal UI utilities using the Rich library
-- **embedding_functions.py**: Custom embedding function for ChromaDB
-
 ## Troubleshooting
 
 - **Ollama Connection Issues**: Ensure Ollama is running with `ollama serve`
 - **Missing Models**: If you see model warnings, pull them with `ollama pull <model_name>`
 - **Memory Issues**: Try using a smaller model like `tinyllama` or reducing the number of workers
 - **ChromaDB Errors**: Check if the `chroma_db` directory has proper permissions
+- **Streamlit Issues**: Ensure Streamlit is installed and run with `streamlit run UI/ollama_rag_app.py`
 
 ## Acknowledgments
 
 - [Ollama](https://ollama.ai/) for providing local LLM execution
 - [ChromaDB](https://www.trychroma.com/) for the vector database
 - [PyPDF2](https://pypdf2.readthedocs.io/) for PDF processing
-- [Rich](https://rich.readthedocs.io/) for terminal UI
+- [Streamlit](https://streamlit.io/) for the interactive UI
